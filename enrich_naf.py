@@ -23,7 +23,7 @@ API_URL = "https://recherche-entreprises.api.gouv.fr/search"
 PAUSE = 0.3
 
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
+# Helpers
 
 def tva_to_siren(tva: str) -> str | None:
     if not isinstance(tva, str):
@@ -64,15 +64,27 @@ def get_naf(identifiant: str) -> tuple[str, str]:
     return data.get("activite_principale", "N/A"), data.get("libelle_activite_principale", "")
 
 
-# ─── Lecture / écriture ───────────────────────────────────────────────────────
+# Lecture avec détection automatique de l'encodage
 
 def read_file(path: Path):
     if path.suffix.lower() == ".csv":
-        with open(path, "r", encoding="utf-8-sig") as f:
-            first_line = f.readline()
-        sep = ";" if first_line.count(";") >= first_line.count(",") else ","
-        print(f"Séparateur CSV détecté : '{sep}'")
-        return pd.read_csv(path, sep=sep, dtype=str), sep
+        encodings = ["utf-8-sig", "utf-8", "cp1252", "latin-1", "iso-8859-1"]
+        df, detected_enc, sep = None, None, ";"
+        for enc in encodings:
+            try:
+                with open(path, "r", encoding=enc) as f:
+                    first_line = f.readline()
+                sep = ";" if first_line.count(";") >= first_line.count(",") else ","
+                df = pd.read_csv(path, sep=sep, dtype=str, encoding=enc)
+                detected_enc = enc
+                break
+            except (UnicodeDecodeError, Exception):
+                continue
+        if df is None:
+            print("Impossible de lire le fichier : encodage non reconnu.")
+            sys.exit(1)
+        print(f"Encodage détecté : {detected_enc} | Séparateur : '{sep}'")
+        return df, sep
     else:
         return pd.read_excel(path, dtype=str), None
 
@@ -84,7 +96,7 @@ def write_file(df: pd.DataFrame, output_path: Path, sep: str | None):
         df.to_excel(output_path, index=False)
 
 
-# ─── Main ─────────────────────────────────────────────────────────────────────
+# Main
 
 def main():
     parser = argparse.ArgumentParser()
@@ -100,35 +112,30 @@ def main():
     df, sep = read_file(path)
     print(f"{len(df)} lignes | Colonnes : {list(df.columns)}\n")
 
-    # Colonnes cibles (noms exacts du fichier)
-    COL_NOM    = "Intitulé"
-    COL_PAYS   = "Pays"
-    COL_SIRET  = "N°SIREN/SIRET"
-    COL_TVA    = "TVA Intracom"
-    COL_NAF    = "Code NAF"
-    COL_LABEL  = "Libellé NAF"
+    COL_NOM   = "Intitulé"
+    COL_PAYS  = "Pays"
+    COL_SIRET = "N°SIREN/SIRET"
+    COL_TVA   = "TVA Intracom"
+    COL_NAF   = "Code NAF"
+    COL_LABEL = "Libellé NAF"
 
-    # Vérification colonnes obligatoires
     for col in [COL_PAYS, COL_SIRET]:
         if col not in df.columns:
             print(f"Colonne obligatoire introuvable : '{col}'")
             print(f"Colonnes disponibles : {list(df.columns)}")
             sys.exit(1)
 
-    # Filtre FRA
     masque_fra = df[COL_PAYS].str.strip().str.upper() == "FRA"
     nb_fra = masque_fra.sum()
     nb_hors = (~masque_fra).sum()
     print(f"Lignes FRA à traiter  : {nb_fra}")
     print(f"Lignes hors FRA (skip): {nb_hors}\n")
 
-    # Initialisation des colonnes résultat
     if COL_NAF not in df.columns:
         df[COL_NAF] = ""
     if COL_LABEL not in df.columns:
         df[COL_LABEL] = ""
 
-    # Enrichissement uniquement sur les lignes FRA
     for i, row in df[masque_fra].iterrows():
         identifiant = None
 
@@ -155,7 +162,6 @@ def main():
         df.at[i, COL_NAF]   = naf
         df.at[i, COL_LABEL] = label
 
-    # Sauvegarde
     output_path = path.parent / f"{path.stem}_enrichi{path.suffix}"
     write_file(df, output_path, sep)
 
