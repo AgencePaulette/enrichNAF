@@ -1,0 +1,32 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # permet de lancer manuellement depuis GitHub
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Installation Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Installation des dépendances
+        run: pip install requests openpyxl pandas pyinstaller
+
+      - name: Compilation du .exe
+        run: pyinstaller --onefile --name enrich_naf enrich_naf.py
+
+      - name: Upload de l'artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: enrich_naf_windows
+          path: dist/enrich_naf.exe
+          retention-days: 30
